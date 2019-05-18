@@ -9,12 +9,24 @@
 
 #include <thread>
 #include <limits>
+#include <queue>
 
 static constexpr size_t IMAGE_WIDTH = 1280;
-static constexpr size_t IMAGE_HEIGHT = 800;
+static constexpr size_t IMAGE_HEIGHT = 720;
 static constexpr size_t RES_DIVIDER = 1;
 static constexpr size_t SAMPLE_COUNT = 128;
 static constexpr float ASPECT_RATIO = float(IMAGE_WIDTH) / float(IMAGE_HEIGHT);
+static constexpr size_t NUM_TILE_X = 8;
+static constexpr size_t NUM_TILE_Y = 10;
+static constexpr size_t NUM_WORKERS = 8;
+
+static_assert(IMAGE_WIDTH % NUM_TILE_X == 0, "all tiles must have equal dimensions");
+static_assert(IMAGE_HEIGHT % NUM_TILE_Y == 0, "all tiles must have equal dimensions");
+
+struct Tile {
+	size_t xStart, yStart;
+	size_t width, height;
+};
 
 Vector3f color(const Rayf& ray, Hittable& world, int depth){
 	Hit hit;
@@ -33,9 +45,14 @@ Vector3f color(const Rayf& ray, Hittable& world, int depth){
 	}
 }
 
-void renderFrame(ImageRGBAUNorm& img, Hittable& world, const Camera& camera){
-	for(size_t y=0; y < img.height(); ++y){
-		for(size_t x=0; x < img.width(); ++x){
+void renderTile(ImageRGBAUNorm& img, Hittable& world, const Camera& camera, const Tile& tile){
+	const size_t xStart = tile.xStart;
+	const size_t yStart = tile.yStart;
+	const size_t width = tile.width;
+	const size_t height = tile.height;
+	
+	for(size_t y=yStart; y < yStart + height; ++y){
+		for(size_t x=xStart; x < xStart + width; ++x){
 			Vector3f result = {0.f, 0.f, 0.f};
 			
 			for(size_t s=0; s < SAMPLE_COUNT; ++s){
@@ -93,8 +110,36 @@ void populateWorld(World& world){
 	world.add(new Sphere(Vector3f{ 4, 1, 0}, 1.0f, new MetalMaterial(Vector3f{.7, .6, .5}, 0)));
 }
 
+void generateTiles(std::queue<Tile>& tiles){
+	const size_t tileWidth = IMAGE_WIDTH/NUM_TILE_X;
+	const size_t tileHeight = IMAGE_HEIGHT/NUM_TILE_Y;
+	
+	for(size_t y=0; y < NUM_TILE_Y; ++y){
+		for(size_t x=0; x < NUM_TILE_X; ++x){
+			tiles.push({
+				x * tileWidth, y * tileHeight,
+				tileWidth, tileHeight,
+			});
+		}
+	}
+}
+
+void updateWindowTitle(SDL_Window *window, size_t ms){
+	static char title[100];
+	
+	if( ms > 0 ){
+		sprintf(title, "%zums|%zux%zu@%zu", ms, IMAGE_WIDTH/RES_DIVIDER, IMAGE_HEIGHT/RES_DIVIDER, SAMPLE_COUNT);
+	} else {
+		sprintf(title, "%zux%zu@%zu", IMAGE_WIDTH/RES_DIVIDER, IMAGE_HEIGHT/RES_DIVIDER, SAMPLE_COUNT);
+	}
+	
+	SDL_SetWindowTitle(window, title);
+}
+
 int main(int argc, const char * argv[]) {
+	// Set up the rendering
 	ImageRGBAUNorm image(IMAGE_WIDTH/RES_DIVIDER, IMAGE_HEIGHT/RES_DIVIDER);
+	memset(image.pixels(), 0, sizeof(PixelRGBAUNorm) * image.width() * image.height());
 	
 	const Vector3f lookFrom = {13, 2, 3};
 	const Vector3f lookAt = {0, 0, 0};
@@ -102,25 +147,57 @@ int main(int argc, const char * argv[]) {
 	const float aperture = 0.1f;
 	Camera camera(lookFrom, lookAt, Vector3f{0, 1, 0}, 20, ASPECT_RATIO, aperture, distanceToFocus);
 	
+	// Generate the world we'll render
 	World world;
 	populateWorld(world);
 	
+	// Start the window for displaying the image
 	SDL_Window *window; SDL_Renderer *renderer; SDL_Texture *texture;
 	SDL_Init(SDL_INIT_EVERYTHING);
 	SDL_CreateWindowAndRenderer(IMAGE_WIDTH, IMAGE_HEIGHT, SDL_WINDOW_SHOWN, &window, &renderer);
 	texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STREAMING, IMAGE_WIDTH/RES_DIVIDER, IMAGE_HEIGHT/RES_DIVIDER);
 	
-	std::thread t([&](){
-		// Render the frame
-		auto tStart = SDL_GetTicks();
-		renderFrame(image, world, camera);
-		auto tEnd = SDL_GetTicks();
-		
-		// Update the stats in the window title
-		static char title[100];
-		sprintf(title, "%dms|%zux%zu@%zu", tEnd - tStart, image.width(), image.height(), SAMPLE_COUNT);
-		SDL_SetWindowTitle(window, title);
-	});
+	// Generate the list of tiles to render
+	std::queue<Tile> tiles;
+	generateTiles(tiles);
+	
+	// Start the worker threads
+	std::thread workers[NUM_WORKERS];
+	std::mutex lock;
+	
+	auto msStartTime = SDL_GetTicks();
+	bool finished = false;
+	
+	for(size_t i=0; i < NUM_WORKERS; ++i){
+		workers[i] = std::thread([&,i](){
+			while(true){
+				// Look for a tile to render
+				Tile tile;
+				
+				{
+					std::lock_guard<std::mutex> lg(lock);
+					if( tiles.empty() ){
+						if( !finished ){
+							finished = true;
+							auto msEndTime = SDL_GetTicks();
+							updateWindowTitle(window, msEndTime - msStartTime);
+						}
+						
+						return;
+					}
+					
+					tile = tiles.front();
+					tiles.pop();
+				}
+				
+				// Render the tile
+				renderTile(image, world, camera, tile);
+			}
+		});
+	}
+	
+	// Update the stats in the window title
+	updateWindowTitle(window, 0);
 	
 	for(bool running=true; running;){
 		// Handle events
@@ -144,7 +221,8 @@ int main(int argc, const char * argv[]) {
 		SDL_RenderPresent(renderer);
 	}
 	
-	t.join();
+	for(size_t i=0; i < NUM_WORKERS; ++i)
+		workers[i].join();
 	
 	SDL_DestroyRenderer(renderer);
 	SDL_DestroyWindow(window);
