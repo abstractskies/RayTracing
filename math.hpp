@@ -189,6 +189,17 @@ Vector3<T> randomInUnitSphere(){
 }
 
 template<class T>
+Vector3<T> randomInUnitDisk(){
+	Vector3f p;
+	
+	do {
+		p = T(2.0) * Vector3<T>(drand48(), drand48(), 0) - Vector3f{1, 1, 0};
+	} while( dot(p, p) >= T(1.0) );
+	
+	return p;
+}
+
+template<class T>
 Vector3f reflect(const Vector3<T>& v, const Vector3<T>& n){
 	return v - T(2) * dot(v, n) * n;
 }

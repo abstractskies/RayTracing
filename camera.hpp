@@ -4,13 +4,13 @@
 #include "./math.hpp"
 
 struct Camera {
-	Vector3f origin;
-	Vector3f lowerLeftCorner;
-	Vector3f horizontal;
-	Vector3f vertical;
+	Vector3f origin, lowerLeftCorner, horizontal, vertical;
+	Vector3f u, v, w;
+	float lensRadius;
 	
-	Camera(float degVerticalFov, float aspect);
-	Camera(Vector3f lookFrom, Vector3f lookAt, Vector3f up, float degVerticalFov, float aspect);
+	Camera(Vector3f lookFrom, Vector3f lookAt, Vector3f up, 
+		   float degVerticalFov, float aspect, 
+		   float aperture, float focusDistance);
 	
 	Rayf rayFor(Vector2f uv) const;
 };
