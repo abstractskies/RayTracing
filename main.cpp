@@ -10,8 +10,8 @@
 #include <thread>
 #include <limits>
 
-static constexpr size_t IMAGE_WIDTH = 640;
-static constexpr size_t IMAGE_HEIGHT = 360;
+static constexpr size_t IMAGE_WIDTH = 1280;
+static constexpr size_t IMAGE_HEIGHT = 800;
 static constexpr size_t RES_DIVIDER = 1;
 static constexpr size_t SAMPLE_COUNT = 128;
 static constexpr float ASPECT_RATIO = float(IMAGE_WIDTH) / float(IMAGE_HEIGHT);
@@ -60,17 +60,48 @@ void renderFrame(ImageRGBAUNorm& img, Hittable& world, const Camera& camera){
 }
 
 void populateWorld(World& world){
-	world.add(new Sphere(Vector3f{ 0.f,    0.0f, -1.f},   0.5f, new DiffuseMaterial(Vector3f{.1f, .2f, .5f})));
-	world.add(new Sphere(Vector3f{ 0.f, -100.5f, -1.f}, 100.0f, new DiffuseMaterial(Vector3f{.8f, .8f, .0f})));
-	world.add(new Sphere(Vector3f{ 1.f,    0.0f, -1.f},   0.5f, new MetalMaterial(Vector3f{.8f, .6f, .2f}, 0.f)));
-	world.add(new Sphere(Vector3f{-1.f,    0.0f, -1.f},   0.5f, new DielectricMaterial(1.5f)));
-	world.add(new Sphere(Vector3f{-1.f,    0.0f, -1.f},  -0.45f, new DielectricMaterial(1.5f)));
+	world.add(new Sphere(Vector3f{0, -1000, 0}, 1000, new DiffuseMaterial(Vector3f{.5, .5, .5})));
+	
+	for(int a=-11; a < 11; ++a){
+		for(int b=-11; b < 11; ++b){
+			float chooseMaterial = drand48();
+			Vector3f center(a + 0.9f * drand48(), 0.2f, b + 0.9f * drand48());
+			Material *material = nullptr;
+			
+			if( (center - Vector3f{4.f, .2f, 0}).length() > 0.9f ){
+				const Vector3f color(drand48() * drand48(), 
+									 drand48() * drand48(), 
+									 drand48() * drand48());
+				
+				material = new DiffuseMaterial(color);
+			} else if( chooseMaterial < 0.95f ){
+				const Vector3f color(.5f * (1 + drand48()), 
+									 .5f * (1 + drand48()), 
+									 .5f * (1 + drand48()));
+				
+				material = new MetalMaterial(color, 0.5f * drand48());
+			} else {
+				material = new DielectricMaterial(1.5f);
+			}
+			
+			world.add(new Sphere(center, 0.2f, material));
+		}
+	}
+	
+	world.add(new Sphere(Vector3f{ 0, 1, 0}, 1.0f, new DielectricMaterial(1.5)));
+	world.add(new Sphere(Vector3f{-4, 1, 0}, 1.0f, new DiffuseMaterial(Vector3f{.4, .2, .1})));
+	world.add(new Sphere(Vector3f{ 4, 1, 0}, 1.0f, new MetalMaterial(Vector3f{.7, .6, .5}, 0)));
 }
 
 int main(int argc, const char * argv[]) {
 	ImageRGBAUNorm image(IMAGE_WIDTH/RES_DIVIDER, IMAGE_HEIGHT/RES_DIVIDER);
 	
-	Camera camera(Vector3f{-2, 2, 1}, Vector3f{0, 0, -1}, Vector3f{0, 1, 0}, 45, ASPECT_RATIO);
+	const Vector3f lookFrom = {13, 2, 3};
+	const Vector3f lookAt = {0, 0, 0};
+	const float distanceToFocus = 10;
+	const float aperture = 0.1f;
+	Camera camera(lookFrom, lookAt, Vector3f{0, 1, 0}, 20, ASPECT_RATIO, aperture, distanceToFocus);
+	
 	World world;
 	populateWorld(world);
 	
